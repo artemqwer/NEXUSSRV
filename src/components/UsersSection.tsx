@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { UserPlus, Search, Shield, MoreVertical, CheckCircle2, XCircle, Clock } from "lucide-react";
 
 interface User {
@@ -13,44 +12,92 @@ interface User {
   ip: string;
 }
 
-const USERS: User[] = [
-  { id: 1,  name: "Admin_Pro",    email: "admin@nexus.srv",    role: "Owner",     status: "online",  lastSeen: "Зараз",      ip: "192.168.1.1" },
-  { id: 2,  name: "Killer777",    email: "killer@mail.com",    role: "Admin",      status: "online",  lastSeen: "Зараз",      ip: "95.18.22.103" },
-  { id: 3,  name: "Noob_Master",  email: "noob@mail.com",      role: "Player",     status: "offline", lastSeen: "2 год. тому", ip: "178.45.12.88" },
-  { id: 4,  name: "Viking2000",   email: "viking@ua.net",      role: "VIP",        status: "online",  lastSeen: "Зараз",      ip: "37.52.11.200" },
-  { id: 5,  name: "Shadow",       email: "shadow@nexus.srv",   role: "Moderator",  status: "offline", lastSeen: "1 год. тому", ip: "10.0.0.42" },
-  { id: 6,  name: "CrazyFox",     email: "fox@gmail.com",      role: "Player",     status: "banned",  lastSeen: "3 дні тому", ip: "91.140.1.55" },
-  { id: 7,  name: "NightOwl",     email: "owl@ua.net",         role: "VIP",        status: "online",  lastSeen: "Зараз",      ip: "77.88.21.6" },
-  { id: 8,  name: "ProGamer99",   email: "pro@gaming.com",     role: "Player",     status: "offline", lastSeen: "5 год. тому", ip: "46.98.77.111" },
-];
+
 
 const roleColors: Record<string, { bg: string; text: string; border: string }> = {
   Owner:     { bg: "rgba(251,191,36,0.1)",  text: "#fbbf24", border: "rgba(251,191,36,0.2)" },
+  owner:     { bg: "rgba(251,191,36,0.1)",  text: "#fbbf24", border: "rgba(251,191,36,0.2)" },
   Admin:     { bg: "rgba(248,113,113,0.1)", text: "#f87171", border: "rgba(248,113,113,0.2)" },
+  admin:     { bg: "rgba(248,113,113,0.1)", text: "#f87171", border: "rgba(248,113,113,0.2)" },
   Moderator: { bg: "rgba(0,229,255,0.1)",   text: "#00e5ff", border: "rgba(0,229,255,0.2)" },
   VIP:       { bg: "rgba(192,132,252,0.1)", text: "#c084fc", border: "rgba(192,132,252,0.2)" },
   Player:    { bg: "rgba(107,114,128,0.1)", text: "#9ca3af", border: "rgba(107,114,128,0.2)" },
+  player:    { bg: "rgba(107,114,128,0.1)", text: "#9ca3af", border: "rgba(107,114,128,0.2)" },
 };
 
 const statusIcon = { online: CheckCircle2, offline: Clock, banned: XCircle };
 const statusColor = { online: "#34d399", offline: "#6b7280", banned: "#f87171" };
 const statusLabel = { online: "Online", offline: "Offline", banned: "Заблокований" };
 
+import { useState, useEffect } from "react";
+
 export function UsersSection() {
+  const [users, setUsers] = useState<User[]>([]);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("all");
+  const [loading, setLoading] = useState(true);
 
-  const filtered = USERS.filter(u => {
+  // Modal State
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [formLogin, setFormLogin] = useState("");
+  const [formDisplayName, setFormDisplayName] = useState("");
+  const [formPassword, setFormPassword] = useState("");
+  const [formRole, setFormRole] = useState("player");
+  const [formError, setFormError] = useState("");
+
+  const fetchUsers = async () => {
+    try {
+      const res = await fetch("/api/users");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setUsers(data);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchUsers();
+  }, []);
+
+  const handleAddUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormError("");
+    try {
+      const res = await fetch("/api/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ login: formLogin, displayName: formDisplayName, password: formPassword, role: formRole }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setFormError(data.error || "Помилка");
+      } else {
+        setIsModalOpen(false);
+        setFormLogin("");
+        setFormPassword("");
+        setFormDisplayName("");
+        setFormRole("player");
+        fetchUsers();
+      }
+    } catch {
+      setFormError("Сервер не відповідає");
+    }
+  };
+
+  const filtered = users.filter(u => {
     const matchSearch = u.name.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase());
     const matchStatus = filterStatus === "all" || u.status === filterStatus;
     return matchSearch && matchStatus;
   });
 
   const counts = {
-    all:     USERS.length,
-    online:  USERS.filter(u => u.status === "online").length,
-    offline: USERS.filter(u => u.status === "offline").length,
-    banned:  USERS.filter(u => u.status === "banned").length,
+    all:     users.length,
+    online:  users.filter(u => u.status === "online").length,
+    offline: users.filter(u => u.status === "offline").length,
+    banned:  users.filter(u => u.status === "banned").length,
   };
 
   return (
@@ -59,9 +106,13 @@ export function UsersSection() {
       <div className="flex flex-wrap items-center justify-between gap-3 shrink-0">
         <div>
           <h1 className="text-xl font-bold text-white">Користувачі</h1>
-          <p className="text-xs text-gray-500 mt-0.5">{USERS.length} акаунтів • {counts.online} online</p>
+          <p className="text-xs text-gray-500 mt-0.5">{users.length} акаунтів • {counts.online} online</p>
         </div>
-        <button className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg font-medium transition-all" style={{ background: "var(--cyan-dim)", color: "var(--cyan)", border: "1px solid rgba(0,229,255,0.2)" }}>
+        <button 
+          onClick={() => setIsModalOpen(true)}
+          className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg font-medium transition-all" 
+          style={{ background: "var(--cyan-dim)", color: "var(--cyan)", border: "1px solid rgba(0,229,255,0.2)" }}
+        >
           <UserPlus size={13} />
           Додати користувача
         </button>
@@ -161,10 +212,47 @@ export function UsersSection() {
             })}
           </tbody>
         </table>
-        {filtered.length === 0 && (
+        {loading && <div className="py-10 text-center text-gray-600 text-sm">Завантаження бази...</div>}
+        {!loading && filtered.length === 0 && (
           <div className="py-10 text-center text-gray-600 text-sm">Нічого не знайдено</div>
         )}
       </div>
+
+      {isModalOpen && (
+        <div className="fixed inset-0 z-100 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(6px)" }} onClick={(e) => { if(e.target === e.currentTarget) setIsModalOpen(false); }}>
+          <div className="w-full max-w-sm rounded-2xl p-6" style={{ background: "#161b23", border: "1px solid rgba(0,229,255,0.15)", boxShadow: "0 0 60px rgba(0,229,255,0.08)" }}>
+            <h2 className="text-lg font-bold text-white mb-4">Створити акаунт</h2>
+            <form onSubmit={handleAddUser} className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-xs text-gray-500 uppercase">Логін</label>
+                <input value={formLogin} onChange={e => setFormLogin(e.target.value)} required className="w-full px-3 py-2 rounded-lg text-sm bg-black/20 text-white outline-none border border-white/10 focus:border-cyan-500/50" placeholder="admin2" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-gray-500 uppercase">Ім&apos;я (опційно)</label>
+                <input value={formDisplayName} onChange={e => setFormDisplayName(e.target.value)} className="w-full px-3 py-2 rounded-lg text-sm bg-black/20 text-white outline-none border border-white/10 focus:border-cyan-500/50" placeholder="Адмін Плюс" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-gray-500 uppercase">Роль</label>
+                <select value={formRole} onChange={e => setFormRole(e.target.value)} className="w-full px-3 py-2 rounded-lg text-sm bg-black/20 text-white outline-none border border-white/10 focus:border-cyan-500/50">
+                  <option value="owner">Owner</option>
+                  <option value="admin">Admin</option>
+                  <option value="vip">VIP</option>
+                  <option value="player">Player</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-gray-500 uppercase">Пароль</label>
+                <input value={formPassword} onChange={e => setFormPassword(e.target.value)} required type="password" className="w-full px-3 py-2 rounded-lg text-sm bg-black/20 text-white outline-none border border-white/10 focus:border-cyan-500/50" placeholder="••••••" />
+              </div>
+              {formError && <div className="text-xs text-red-400">{formError}</div>}
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 rounded-lg text-xs font-medium text-gray-400 hover:text-white transition-colors">Скасувати</button>
+                <button type="submit" className="px-4 py-2 rounded-lg text-xs font-medium text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 hover:bg-cyan-500/20 transition-colors">Створити</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -11,7 +11,7 @@ import { api, ServerStats } from "@/api";
 import {
   Cpu, MemoryStick, HardDrive, Network,
   Bell, Search, CheckCircle2, Flame, AlertTriangle, Menu,
-  BatteryMedium, Smartphone, LogOut,
+  BatteryMedium, Smartphone, LogOut, XCircle
 } from "lucide-react";
 
 // Динамічний імпорт секцій
@@ -37,34 +37,38 @@ function ProgressBar({ value, color = "var(--cyan)" }: { value: number; color?: 
 // ============================
 function DashboardSection() {
   const [stats, setStats] = useState<ServerStats | null>(null);
-  const [tick,  setTick]  = useState(0);
   const [now,   setNow]   = useState("");
 
-  useEffect(() => { api.getStats().then(setStats); }, []);
-
   useEffect(() => {
-    // Стартуємо інтервал — і час, і tick оновлюємо всередині колбеку (не синхронно в body)
-    const tick = () => {
-      setTick(n => n + 1);
+    const fetchStats = () => {
+      api.getStats().then(setStats).catch(() => setStats(null));
+    };
+    fetchStats();
+    const tStats = setInterval(fetchStats, 2000);
+
+    const tickClock = () => {
       setNow(new Date().toLocaleTimeString("uk-UA"));
     };
-    tick(); // перший виклик через setTimeout щоб не бути синхронним у body
-    // Але useEffect вже запускається тільки на клієнті, тому це safe
-    const t = setInterval(tick, 2000);
-    return () => clearInterval(t);
+    tickClock();
+    const tClock = setInterval(tickClock, 1000);
+
+    return () => {
+      clearInterval(tStats);
+      clearInterval(tClock);
+    };
   }, []);
 
-  // Якщо немає сервера — малюємо "очікувані" дефолтні
-  const cpuLoad     = stats?.cpu?.usage ?? (28 + Math.round(Math.sin(tick * 0.7) * 10));
-  const temperature = stats?.cpu?.temp  ?? (48 + Math.round(Math.cos(tick * 0.5) * 4));
-  const ramUsedGB   = stats?.ram?.used ? +(stats.ram.used / 1024).toFixed(1) : +(2.1 + Math.round(Math.sin(tick * 0.3) * 10) / 10).toFixed(1);
-  const ramTotalGB  = stats?.ram?.total ? +(stats.ram.total / 1024).toFixed(1) : 6;
-  const ramPercent  = stats?.ram?.percent ?? Math.round(ramUsedGB / ramTotalGB * 100);
-  const storageUsed = stats?.storage?.used ?? 22;
-  const storageTot  = stats?.storage?.total ?? 128;
-  const storagePerc = stats?.storage?.percent ?? Math.round((storageUsed/storageTot)*100);
+  const isOnline    = stats !== null;
+  const cpuLoad     = stats?.cpu?.usage ?? 0;
+  const temperature = stats?.cpu?.temp  ?? 0;
+  const ramUsedGB   = stats?.ram?.used ? +(stats.ram.used / 1024).toFixed(1) : 0;
+  const ramTotalGB  = stats?.ram?.total ? +(stats.ram.total / 1024).toFixed(1) : 0;
+  const ramPercent  = stats?.ram?.percent ?? 0;
+  const storageUsed = stats?.storage?.used ?? 0;
+  const storageTot  = stats?.storage?.total ?? 0;
+  const storagePerc = Math.round(storageTot > 0 ? (storageUsed/storageTot)*100 : 0);
   const tempWarn    = temperature >= 55;
-  const batteryLvl  = stats?.battery?.level ?? 74;
+  const batteryLvl  = stats?.battery?.level ?? null;
 
   return (
     <div className="flex flex-col gap-5 h-full overflow-hidden">
@@ -77,13 +81,23 @@ function DashboardSection() {
           </div>
           <p className="text-xs text-gray-500">Debian Linux · ARM · Останнє оновлення: {now}</p>
         </div>
-        <div
-          className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium"
-          style={{ background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.2)", color: "#34d399" }}
-        >
-          <CheckCircle2 size={13} />
-          Всі системи в нормі
-        </div>
+        {isOnline ? (
+          <div
+            className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium"
+            style={{ background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.2)", color: "#34d399" }}
+          >
+            <CheckCircle2 size={13} />
+            Всі системи в нормі
+          </div>
+        ) : (
+          <div
+            className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium"
+            style={{ background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.2)", color: "#f87171" }}
+          >
+            <XCircle size={13} />
+            Сервер офлайн
+          </div>
+        )}
       </div>
 
       {/* Stat cards — ARM-specific values */}
@@ -140,17 +154,17 @@ function DashboardSection() {
                 </span>
               )}
             </div>
-            <TemperatureGauge value={temperature} maxTemp={80} label="CPU Thermal Zone" />
+            <TemperatureGauge value={temperature} maxTemp={80} label={isOnline ? "CPU Thermal Zone" : "Немає зв'язку"} />
           </div>
 
           {/* Meta grid */}
           <div className="flex-1 grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
             {[
-              { label: "Статус",        value: tempWarn ? "Підвищена" : "Норма",   color: tempWarn ? "#f59e0b" : "#34d399", icon: tempWarn ? <AlertTriangle size={11} /> : <CheckCircle2 size={11} /> },
+              { label: "Статус",        value: isOnline ? (tempWarn ? "Підвищена" : "Норма") : "Офлайн",   color: isOnline ? (tempWarn ? "#f59e0b" : "#34d399") : "#6b7280", icon: isOnline ? (tempWarn ? <AlertTriangle size={11} /> : <CheckCircle2 size={11} />) : <XCircle size={11} /> },
               { label: "Критична",      value: "80°C",                              color: "#f87171", icon: null },
-              { label: "Акумулятор",    value: `${batteryLvl}%`,                   color: "#34d399", icon: <BatteryMedium size={11} /> },
-              { label: "Зарядка",       value: stats?.battery?.isCharging ? "Так" : "Ні", color: "#34d399", icon: null },
-              { label: "Аптайм",        value: stats?.uptime          ?? "--",      color: "#94a3b8", icon: null },
+              { label: "Акумулятор",    value: isOnline && batteryLvl !== null ? `${batteryLvl}%` : "—",                   color: isOnline ? "#34d399" : "#6b7280", icon: <BatteryMedium size={11} /> },
+              { label: "Зарядка",       value: isOnline ? (stats?.battery?.isCharging ? "Так" : "Ні") : "—", color: isOnline ? "#34d399" : "#6b7280", icon: null },
+              { label: "Аптайм",        value: stats?.uptime          ?? "—",      color: isOnline ? "#94a3b8" : "#6b7280", icon: null },
             ].map(({ label, value, color, icon }) => (
               <div key={label} className="rounded-lg p-3" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid var(--border)" }}>
                 <div className="text-gray-500 mb-1">{label}</div>

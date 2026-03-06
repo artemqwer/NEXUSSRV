@@ -1,0 +1,34 @@
+/* xterm.js base styles */
+@import "@xterm/xterm/css/xterm.css";
+@import "tailwindcss";
+
+:root {
+  --sidebar-bg: #0d1117;
+  --main-bg: #10141a;
+  --card-bg: #161b23;
+  --border: rgba(255,255,255,0.06);
+  --cyan: #00e5ff;
+  --cyan-dim: rgba(0,229,255,0.12);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--main-bg);
+  color: #e2e8f0;
+  font-family: 'Inter', sans-serif;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0,229,255,0.3); }
+
+.log-info  { color: #38bdf8; }
+.log-warn  { color: #fbbf24; }
+.log-error { color: #f87171; }
+.log-source{ color: #6b7280; }

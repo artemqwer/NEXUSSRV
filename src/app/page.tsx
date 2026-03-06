@@ -295,7 +295,7 @@ export default function AdminDashboard() {
             {active === "storage"    && <StorageSection />}
             {active === "network"    && <NetworkSection />}
             {active === "terminal"   && <TerminalSection />}
-            {active === "users"      && <UsersSection />}
+            {active === "users"      && <UsersSection currentUser={currentUser} />}
             {active === "settings"   && <SettingsSection />}
           </main>
         </div>

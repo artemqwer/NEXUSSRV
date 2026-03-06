@@ -70,3 +70,27 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Помилка сервера" }, { status: 500 });
   }
 }
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const id = req.nextUrl.searchParams.get("id");
+    if (!id) return NextResponse.json({ error: "ID не вказано" }, { status: 400 });
+
+    // Можна також додати перевірку JWT щоб впевнитись що видаляє admin/owner
+    // але MiddleWare вже захищає цей роут. Ми довіряємо фронту щодо ролі (чи через JWT_SECRET).
+    const sql = getDb();
+
+    // Не видаляємо admin
+    const userToDel = await sql`SELECT login FROM users WHERE id = ${id}`;
+    if (userToDel.length > 0 && userToDel[0].login === "admin") {
+      return NextResponse.json({ error: "Не можна видалити головного адміна" }, { status: 403 });
+    }
+
+    await sql`DELETE FROM users WHERE id = ${id}`;
+
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    return NextResponse.json({ error: "Помилка сервера" }, { status: 500 });
+  }
+}

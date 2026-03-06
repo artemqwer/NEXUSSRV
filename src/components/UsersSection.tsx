@@ -1,6 +1,6 @@
 "use client";
 
-import { UserPlus, Search, Shield, MoreVertical, CheckCircle2, XCircle, Clock } from "lucide-react";
+import { UserPlus, Search, Shield, MoreVertical, CheckCircle2, XCircle, Clock, Trash2 } from "lucide-react";
 
 interface User {
   id: number;
@@ -31,7 +31,7 @@ const statusLabel = { online: "Online", offline: "Offline", banned: "Забло�
 
 import { useState, useEffect } from "react";
 
-export function UsersSection() {
+export function UsersSection({ currentUser }: { currentUser?: { displayName: string; role: string } | null }) {
   const [users, setUsers] = useState<User[]>([]);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("all");
@@ -87,6 +87,21 @@ export function UsersSection() {
     }
   };
 
+  const handleDeleteUser = async (id: number) => {
+    if (!confirm("Дійсно видалити користувача?")) return;
+    try {
+      const res = await fetch(`/api/users?id=${id}`, { method: "DELETE" });
+      if (res.ok) {
+        setUsers(users.filter(u => u.id !== id));
+      } else {
+        const d = await res.json();
+        alert(d.error || "Помилка видалення");
+      }
+    } catch (e) {
+      alert("Сервер не відповідає");
+    }
+  };
+
   const filtered = users.filter(u => {
     const matchSearch = u.name.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase());
     const matchStatus = filterStatus === "all" || u.status === filterStatus;
@@ -100,6 +115,8 @@ export function UsersSection() {
     banned:  users.filter(u => u.status === "banned").length,
   };
 
+  const canManage = currentUser?.role === "owner" || currentUser?.role === "admin";
+
   return (
     <div className="flex flex-col gap-5 h-full overflow-y-auto pb-2">
       {/* Header */}
@@ -108,14 +125,16 @@ export function UsersSection() {
           <h1 className="text-xl font-bold text-white">Користувачі</h1>
           <p className="text-xs text-gray-500 mt-0.5">{users.length} акаунтів • {counts.online} online</p>
         </div>
-        <button 
-          onClick={() => setIsModalOpen(true)}
-          className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg font-medium transition-all" 
-          style={{ background: "var(--cyan-dim)", color: "var(--cyan)", border: "1px solid rgba(0,229,255,0.2)" }}
-        >
-          <UserPlus size={13} />
-          Додати користувача
-        </button>
+        {canManage && (
+          <button 
+            onClick={() => setIsModalOpen(true)}
+            className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg font-medium transition-all" 
+            style={{ background: "var(--cyan-dim)", color: "var(--cyan)", border: "1px solid rgba(0,229,255,0.2)" }}
+          >
+            <UserPlus size={13} />
+            Додати користувача
+          </button>
+        )}
       </div>
 
       {/* Filters + Search */}
@@ -203,9 +222,20 @@ export function UsersSection() {
                   <td className="px-4 py-3 text-gray-600 hidden lg:table-cell">{u.lastSeen}</td>
                   {/* Actions */}
                   <td className="px-4 py-3 text-right">
-                    <button className="p-1.5 rounded-md text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors">
-                      <MoreVertical size={14} />
-                    </button>
+                    <div className="flex justify-end items-center gap-1">
+                      {canManage && u.email !== "admin" && (
+                        <button 
+                          onClick={() => handleDeleteUser(u.id)}
+                          title="Видалити користувача"
+                          className="p-1.5 rounded-md text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      )}
+                      <button className="p-1.5 rounded-md text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors">
+                        <MoreVertical size={14} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );

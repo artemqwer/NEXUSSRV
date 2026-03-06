@@ -2,8 +2,8 @@ import { neon } from "@neondatabase/serverless";
 
 // Підключення до Neon PostgreSQL
 export function getDb() {
-  const url = process.env.DATABASE_URL;
-  if (!url) throw new Error("DATABASE_URL не вказано у .env.local");
+  const url = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+  if (!url) throw new Error("DATABASE_URL або POSTGRES_URL не вказано у .env.local/Vercel");
   return neon(url);
 }
 

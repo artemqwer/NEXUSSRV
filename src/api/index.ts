@@ -5,14 +5,17 @@
  * та вкажи реальний API_BASE_URL (наприклад, http://його_айпі:8080/api).
  */
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
-const USE_MOCK = true; // Зміни на false, щоб піти на реальний сервер
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api";
+const API_KEY      = process.env.NEXT_PUBLIC_API_KEY || "";
+const USE_MOCK = false; 
 
 export interface ServerStats {
-  users: number;
-  online: number;
-  serverLoad: string;
+  cpu: { usage: number; temp: number | null; cores: number };
+  ram: { total: number; used: number; percent: number };
+  battery: { level: number | null; isCharging: boolean | null };
+  storage: { total: number; used: number; percent: number };
   uptime: string;
+  network: { ping: number | null };
 }
 
 export interface Player {
@@ -27,15 +30,20 @@ export const api = {
   getStats: async (): Promise<ServerStats | null> => {
     if (USE_MOCK) {
       return {
-        users: 1543,
-        online: 236,
-        serverLoad: "64%",
+        cpu: { usage: 45, temp: 50, cores: 8 },
+        ram: { total: 6000, used: 3000, percent: 50 },
+        battery: { level: 70, isCharging: true },
+        storage: { total: 128, used: 45, percent: 35 },
         uptime: "14D 05H",
+        network: { ping: 42 },
       };
     }
 
     try {
-      const res = await fetch(`${API_BASE_URL}/stats`);
+      const headers: Record<string, string> = {};
+      if (API_KEY) headers["Authorization"] = `Bearer ${API_KEY}`;
+      
+      const res = await fetch(`${API_BASE_URL}/stats`, { headers });
       if (!res.ok) throw new Error("Сервер недоступний");
       return res.json();
     } catch (e) {

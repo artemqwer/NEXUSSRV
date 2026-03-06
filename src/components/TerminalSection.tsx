@@ -7,10 +7,13 @@ import { Wifi, WifiOff, RefreshCw, Terminal as TermIcon } from "lucide-react";
 // Бекенд друга повинен піднімати WS-сервер (наприклад, через node-pty + ws)
 // на тому ж порту або окремому.
 const getWsUrl = () => {
-  const base = process.env.NEXT_PUBLIC_API_URL || "";
+  const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api";
+  const apiKey = process.env.NEXT_PUBLIC_API_KEY || "";
   if (!base) return null;
   // Перетворюємо http://... → ws://...
-  return base.replace(/^http/, "ws").replace(/\/api$/, "") + "/terminal";
+  let url = base.replace(/^http/, "ws").replace(/\/api$/, "") + "/terminal";
+  if (apiKey) url += `?token=${apiKey}`;
+  return url;
 };
 
 type ConnState = "idle" | "connecting" | "connected" | "error" | "no-config";

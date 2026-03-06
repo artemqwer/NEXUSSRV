@@ -11,30 +11,6 @@ interface LogEntry {
   message: string;
 }
 
-let _id = 100;
-
-const INIT_LOGS: LogEntry[] = [
-  { id: _id++, time: "10:42:01", level: "INFO",  source: "kernel",  message: "System boot sequence initiated." },
-  { id: _id++, time: "10:42:05", level: "INFO",  source: "systemd", message: "Mounting root filesystem: success." },
-  { id: _id++, time: "10:42:12", level: "WARN",  source: "network", message: "High latency detected on eth0 (120ms)." },
-  { id: _id++, time: "10:45:30", level: "INFO",  source: "auth",    message: "User admin logged in from 192.168.1.105" },
-  { id: _id++, time: "11:02:15", level: "ERROR", source: "chronyd", message: "Failed to synchronize with NTP server." },
-  { id: _id++, time: "11:05:42", level: "INFO",  source: "nginx",   message: "Worker process 1234 started." },
-  { id: _id++, time: "11:06:10", level: "WARN",  source: "memory",  message: "Memory usage exceeded 70% threshold." },
-];
-
-const POOL: Omit<LogEntry, "id" | "time">[] = [
-  { level: "INFO",  source: "kernel",  message: "CPU frequency scaling: 3.4GHz" },
-  { level: "INFO",  source: "systemd", message: "Service nginx restarted successfully." },
-  { level: "WARN",  source: "memory",  message: "Memory usage exceeded 70% threshold." },
-  { level: "ERROR", source: "disk",    message: "Disk I/O error on /dev/sda2." },
-  { level: "INFO",  source: "auth",    message: "Session token refreshed for admin." },
-  { level: "WARN",  source: "network", message: "Packet loss detected: 2.3%" },
-  { level: "INFO",  source: "cron",    message: "Scheduled backup started." },
-  { level: "ERROR", source: "sshd",    message: "Failed login attempt from 45.33.32.156" },
-  { level: "INFO",  source: "php-fpm", message: "Child process 5678 started." },
-];
-
 const levelIcon = { INFO: CheckCircle2, WARN: AlertTriangle, ERROR: XCircle };
 const levelColor = { INFO: "#38bdf8", WARN: "#fbbf24", ERROR: "#f87171" };
 const levelBg   = { INFO: "rgba(56,189,248,0.08)", WARN: "rgba(251,191,36,0.08)", ERROR: "rgba(248,113,113,0.08)" };
@@ -42,19 +18,49 @@ const levelBg   = { INFO: "rgba(56,189,248,0.08)", WARN: "rgba(251,191,36,0.08)"
 type FilterLevel = "ALL" | "INFO" | "WARN" | "ERROR";
 
 export function LogsSection() {
-  const [logs, setLogs]       = useState<LogEntry[]>(INIT_LOGS);
+  const [logs, setLogs]       = useState<LogEntry[]>([]);
   const [filter, setFilter]   = useState<FilterLevel>("ALL");
   const [paused, setPaused]   = useState(false);
   const bottomRef             = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (paused) return;
-    const t = setInterval(() => {
-      const pick = POOL[Math.floor(Math.random() * POOL.length)];
-      const now = new Date();
-      const time = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}:${String(now.getSeconds()).padStart(2,"0")}`;
-      setLogs(prev => [...prev.slice(-200), { ...pick, id: _id++, time }]);
-    }, 2500);
+
+    const fetchLogs = async () => {
+      if (paused) return;
+      try {
+        const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api";
+        const key = process.env.NEXT_PUBLIC_API_KEY || "";
+        const headers: Record<string, string> = {};
+        if (key) headers["Authorization"] = `Bearer ${key}`;
+
+        const res = await fetch(`${BASE}/logs?lines=100`, { headers });
+        if (!res.ok) return;
+        const data = await res.json();
+        
+        const parsedLogs: LogEntry[] = data.logs.map((line: string, i: number) => {
+          let level: "INFO" | "WARN" | "ERROR" = "INFO";
+          const lineL = line.toLowerCase();
+          if (lineL.includes("error") || lineL.includes("fail") || lineL.includes("crit")) level = "ERROR";
+          else if (lineL.includes("warn")) level = "WARN";
+
+          const now = new Date();
+          const fallbackTime = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}:${String(now.getSeconds()).padStart(2,"0")}`;
+
+          return {
+            id: i,
+            time: fallbackTime,
+            level,
+            source: data.source || "syslog",
+            message: line,
+          };
+        });
+
+        setLogs(parsedLogs);
+      } catch {}
+    };
+
+    fetchLogs();
+    const t = setInterval(fetchLogs, 3000);
     return () => clearInterval(t);
   }, [paused]);
 

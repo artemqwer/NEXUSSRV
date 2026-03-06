@@ -54,11 +54,17 @@ function DashboardSection() {
     return () => clearInterval(t);
   }, []);
 
-  // Реалістичні значення для ARM-процесора телефону
-  const cpuLoad     = 28 + Math.round(Math.sin(tick * 0.7) * 10);
-  const temperature = 48 + Math.round(Math.cos(tick * 0.5) * 4);
-  const ramUsed     = 2.1 + Math.round(Math.sin(tick * 0.3) * 10) / 10;
+  // Якщо немає сервера — малюємо "очікувані" дефолтні
+  const cpuLoad     = stats?.cpu?.usage ?? (28 + Math.round(Math.sin(tick * 0.7) * 10));
+  const temperature = stats?.cpu?.temp  ?? (48 + Math.round(Math.cos(tick * 0.5) * 4));
+  const ramUsedGB   = stats?.ram?.used ? +(stats.ram.used / 1024).toFixed(1) : +(2.1 + Math.round(Math.sin(tick * 0.3) * 10) / 10).toFixed(1);
+  const ramTotalGB  = stats?.ram?.total ? +(stats.ram.total / 1024).toFixed(1) : 6;
+  const ramPercent  = stats?.ram?.percent ?? Math.round(ramUsedGB / ramTotalGB * 100);
+  const storageUsed = stats?.storage?.used ?? 22;
+  const storageTot  = stats?.storage?.total ?? 128;
+  const storagePerc = stats?.storage?.percent ?? Math.round((storageUsed/storageTot)*100);
   const tempWarn    = temperature >= 55;
+  const batteryLvl  = stats?.battery?.level ?? 74;
 
   return (
     <div className="flex flex-col gap-5 h-full overflow-hidden">
@@ -85,34 +91,34 @@ function DashboardSection() {
         <StatCard
           title="Навантаження ЦП"
           value={`${cpuLoad}%`}
-          subtitle="ARM Cortex-A53 (8 cores)"
+          subtitle={`ARM Cortex-A53 (${stats?.cpu?.cores ?? 8} cores)`}
           icon={Cpu}
           iconColor="#00e5ff"
           extra={<ProgressBar value={cpuLoad} />}
         />
         <StatCard
           title="RAM"
-          value={`${ramUsed.toFixed(1)} / 6 GB`}
-          subtitle={`${Math.round(ramUsed / 6 * 100)}% використано`}
+          value={`${ramUsedGB} / ${ramTotalGB} GB`}
+          subtitle={`${ramPercent}% використано`}
           icon={MemoryStick}
           iconColor="#818cf8"
-          extra={<ProgressBar value={ramUsed / 6 * 100} color="#818cf8" />}
+          extra={<ProgressBar value={ramPercent} color="#818cf8" />}
         />
         <StatCard
           title="Диск (eMMC)"
-          value="18.4 GB"
-          subtitle="Вільно: 62.6 GB / 128 GB"
+          value={`${storageUsed} GB`}
+          subtitle={`Вільно: ${storageTot - storageUsed} GB / ${storageTot} GB`}
           icon={HardDrive}
           iconColor="#34d399"
-          extra={<ProgressBar value={22} color="#34d399" />}
+          extra={<ProgressBar value={storagePerc} color="#34d399" />}
         />
         <StatCard
-          title="Мережевий трафік"
-          value={stats ? stats.serverLoad : "—"}
+          title="Мережевий Ping"
+          value={stats?.network?.ping ? `${stats.network.ping} ms` : "—"}
           subtitle="wlan0 · Wi-Fi 5"
           icon={Network}
           iconColor="#c084fc"
-          extra={<ProgressBar value={34} color="#c084fc" />}
+          extra={<ProgressBar value={stats?.network?.ping ? Math.min(stats.network.ping, 100) : 0} color="#c084fc" />}
         />
       </div>
 
@@ -142,9 +148,8 @@ function DashboardSection() {
             {[
               { label: "Статус",        value: tempWarn ? "Підвищена" : "Норма",   color: tempWarn ? "#f59e0b" : "#34d399", icon: tempWarn ? <AlertTriangle size={11} /> : <CheckCircle2 size={11} /> },
               { label: "Критична",      value: "80°C",                              color: "#f87171", icon: null },
-              { label: "Акумулятор",    value: "74%",                              color: "#34d399", icon: <BatteryMedium size={11} /> },
-              { label: "Online",        value: String(stats?.online  ?? "--"),      color: "#34d399", icon: null },
-              { label: "Зареєстровано", value: String(stats?.users   ?? "--"),      color: "#94a3b8", icon: null },
+              { label: "Акумулятор",    value: `${batteryLvl}%`,                   color: "#34d399", icon: <BatteryMedium size={11} /> },
+              { label: "Зарядка",       value: stats?.battery?.isCharging ? "Так" : "Ні", color: "#34d399", icon: null },
               { label: "Аптайм",        value: stats?.uptime          ?? "--",      color: "#94a3b8", icon: null },
             ].map(({ label, value, color, icon }) => (
               <div key={label} className="rounded-lg p-3" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid var(--border)" }}>

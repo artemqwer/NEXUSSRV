@@ -15,10 +15,13 @@ const getWsUrl = () => {
 
 type ConnState = "idle" | "connecting" | "connected" | "error" | "no-config";
 
+import type { Terminal } from "@xterm/xterm";
+
 export function TerminalSection() {
   const termDivRef  = useRef<HTMLDivElement>(null);
-  const termRef     = useRef<ReturnType<typeof import("@xterm/xterm")["Terminal"]["prototype"]["constructor"]> | null>(null);
+  const termRef     = useRef<Terminal | null>(null);
   const wsRef       = useRef<WebSocket | null>(null);
+
   const fitRef      = useRef<{ fit(): void } | null>(null);
   const [connState, setConnState] = useState<ConnState>("idle");
   const [wsUrl,     setWsUrl]     = useState<string | null>(null);
@@ -175,7 +178,7 @@ export function TerminalSection() {
       <div className="flex items-center justify-between shrink-0">
         <div>
           <h1 className="text-xl font-bold text-white">Термінал</h1>
-          <p className="text-xs text-gray-500 mt-0.5">SSH-з'єднання з Debian-сервером (телефон)</p>
+          <p className="text-xs text-gray-500 mt-0.5">SSH-з&apos;єднання з Debian-сервером (телефон)</p>
         </div>
 
         <div className="flex items-center gap-3">

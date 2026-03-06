@@ -17,13 +17,15 @@ interface Point {
   temp: number;
 }
 
+import { api, ServerStats } from "@/api";
+
 function initData(): Point[] {
   const arr: Point[] = [];
   const now = Date.now();
   for (let i = MAX_POINTS - 1; i >= 0; i--) {
     const d = new Date(now - i * 3000);
     const t = `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}:${String(d.getSeconds()).padStart(2,"0")}`;
-    arr.push({ time: t, cpu: 35 + Math.round(Math.random() * 25), ram: 48 + Math.round(Math.random() * 10), net: 60 + Math.round(Math.random() * 30), temp: 63 + Math.round(Math.random() * 10) });
+    arr.push({ time: t, cpu: 0, ram: 0, net: 0, temp: 0 });
   }
   return arr;
 }
@@ -60,30 +62,51 @@ function MetricCard({ label, value, sub, color, icon }: MetricCardProps) {
 
 export function MonitoringSection() {
   const [data, setData] = useState<Point[]>(initData);
-  const latest = data[data.length - 1];
+  const [stats, setStats] = useState<ServerStats | null>(null);
 
   useEffect(() => {
-    const t = setInterval(() => {
-      const now = new Date();
-      const time = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}:${String(now.getSeconds()).padStart(2,"0")}`;
-      setData(prev => {
-        const last = prev[prev.length - 1];
-        const newPt: Point = {
-          time,
-          cpu:  Math.max(5,  Math.min(95,  last.cpu  + (Math.random() - 0.5) * 10)),
-          ram:  Math.max(40, Math.min(90,  last.ram  + (Math.random() - 0.5) * 4)),
-          net:  Math.max(10, Math.min(100, last.net  + (Math.random() - 0.5) * 20)),
-          temp: Math.max(50, Math.min(90,  last.temp + (Math.random() - 0.5) * 3)),
-        };
-        newPt.cpu  = Math.round(newPt.cpu);
-        newPt.ram  = Math.round(newPt.ram);
-        newPt.net  = Math.round(newPt.net);
-        newPt.temp = Math.round(newPt.temp);
-        return [...prev.slice(-(MAX_POINTS - 1)), newPt];
-      });
-    }, 3000);
+    const fetchStats = async () => {
+      try {
+        const s = await api.getStats();
+        if (!s) throw new Error();
+        setStats(s);
+
+        const now = new Date();
+        const time = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}:${String(now.getSeconds()).padStart(2,"0")}`;
+        
+        // aggregate overall network traffic across interfaces
+        let netSpeed = 0;
+        if (s.network?.interfaces && s.network.interfaces.length > 0) {
+           const primary = s.network.interfaces.find(i => i.name.startsWith("wl") || i.name.startsWith("en") || i.name.startsWith("eth")) || s.network.interfaces[0];
+           netSpeed = primary.rxRate + primary.txRate;
+        }
+
+        setData(prev => {
+          const newPt: Point = {
+            time,
+            cpu: Math.round(s.cpu?.usage ?? 0),
+            ram: Math.round(s.ram?.percent ?? 0),
+            net: Math.round(netSpeed),
+            temp: Math.round(s.cpu?.temp ?? 0),
+          };
+          return [...prev.slice(-(MAX_POINTS - 1)), newPt];
+        });
+      } catch {
+        setStats(null);
+        // keep adding zero points to flush out old data
+        const now = new Date();
+        const time = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}:${String(now.getSeconds()).padStart(2,"0")}`;
+        setData(prev => [...prev.slice(-(MAX_POINTS - 1)), { time, cpu: 0, ram: 0, net: 0, temp: 0 }]);
+      }
+    };
+    
+    fetchStats();
+    const t = setInterval(fetchStats, 3000);
     return () => clearInterval(t);
   }, []);
+
+  const latest = data[data.length - 1];
+  const isOnline = stats !== null;
 
   return (
     <div className="flex flex-col gap-5 h-full overflow-y-auto pb-2">
@@ -95,10 +118,10 @@ export function MonitoringSection() {
 
       {/* Live metric cards */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 shrink-0">
-        <MetricCard label="ЦП" value={`${latest.cpu}%`} sub="AMD EPYC 7742" color="#00e5ff" icon={<Cpu size={15} />} />
-        <MetricCard label="RAM" value={`${latest.ram}%`} sub={`~${Math.round(latest.ram * 2.56)} / 256 GB`} color="#818cf8" icon={<MemoryStick size={15} />} />
-        <MetricCard label="Мережа" value={`${latest.net} Mbps`} sub="eth0 (1Gbps)" color="#c084fc" icon={<Network size={15} />} />
-        <MetricCard label="Температура" value={`${latest.temp}°C`} sub="DDR5 DIMM_A1" color="#fbbf24" icon={<Thermometer size={15} />} />
+        <MetricCard label="ЦП" value={isOnline ? `${latest.cpu}%` : "—"} sub={`arm64 (${stats?.cpu?.cores || 8} cores)`} color="#00e5ff" icon={<Cpu size={15} />} />
+        <MetricCard label="RAM" value={isOnline ? `${latest.ram}%` : "—"} sub={isOnline ? `~${Math.round((stats?.ram?.used || 0)/1024)} / ${Math.round((stats?.ram?.total || 0)/1024)} GB` : "—"} color="#818cf8" icon={<MemoryStick size={15} />} />
+        <MetricCard label="Мережа" value={isOnline ? `${latest.net} Mbps` : "—"} sub="Всі інтерфейси (Rx+Tx)" color="#c084fc" icon={<Network size={15} />} />
+        <MetricCard label="Температура" value={isOnline ? `${latest.temp}°C` : "—"} sub="CPU Thermal" color="#fbbf24" icon={<Thermometer size={15} />} />
       </div>
 
       {/* CPU + RAM Chart */}

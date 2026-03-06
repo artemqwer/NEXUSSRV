@@ -13,9 +13,33 @@ export interface ServerStats {
   cpu: { usage: number; temp: number | null; cores: number };
   ram: { total: number; used: number; percent: number };
   battery: { level: number | null; isCharging: boolean | null };
-  storage: { total: number; used: number; percent: number };
+  storage: {
+    total: number;
+    used: number;
+    percent: number;
+    disks?: {
+      mount: string;
+      fs: string;
+      size: number;
+      used: number;
+      use: number;
+    }[];
+  };
   uptime: string;
-  network: { ping: number | null };
+  network: {
+    ping: number | null;
+    interfaces?: {
+      name: string;
+      ip: string;
+      mac: string;
+      status: string;
+      speed: number;
+      rx: number;
+      tx: number;
+      rxRate: number;
+      txRate: number;
+    }[];
+  };
 }
 
 export interface Player {

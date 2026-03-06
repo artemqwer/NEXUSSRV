@@ -3,32 +3,7 @@
 import { useEffect, useState } from "react";
 import { Globe, Wifi, WifiOff, Activity } from "lucide-react";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-
-interface Interface {
-  name: string;
-  ip: string;
-  mac: string;
-  status: "up" | "down";
-  speed: string;
-  rx: number;   // MB
-  tx: number;   // MB
-  rxRate: number;   // Mbps
-  txRate: number;
-}
-
-const INTERFACES: Interface[] = [
-  { name: "eth0",  ip: "192.168.0.103", mac: "e4:5f:01:2a:bb:cc", status: "up",   speed: "1 Gbps",  rx: 45600, tx: 8200,  rxRate: 0, txRate: 0 },
-  { name: "eth1",  ip: "10.0.0.1",      mac: "e4:5f:01:2a:bb:dd", status: "down", speed: "10 Gbps", rx: 0,     tx: 0,     rxRate: 0, txRate: 0 },
-  { name: "lo",    ip: "127.0.0.1",     mac: "00:00:00:00:00:00", status: "up",   speed: "—",       rx: 120,   tx: 120,   rxRate: 0, txRate: 0 },
-];
-
-interface PingTarget { host: string; ip: string; latency: number | null }
-const PING_TARGETS: PingTarget[] = [
-  { host: "Google DNS",  ip: "8.8.8.8",     latency: 12 },
-  { host: "Cloudflare",  ip: "1.1.1.1",     latency: 9 },
-  { host: "Шлюз",        ip: "192.168.0.1", latency: 1 },
-  { host: "GitHub",      ip: "140.82.112.3", latency: 28 },
-];
+import { api, ServerStats } from "@/api";
 
 const MAX_PTS = 20;
 interface TrafficPt { time: string; rx: number; tx: number }
@@ -40,8 +15,8 @@ function initTraffic(): TrafficPt[] {
     const d = new Date(now - i * 3000);
     arr.push({
       time: `${String(d.getMinutes()).padStart(2,"0")}:${String(d.getSeconds()).padStart(2,"0")}`,
-      rx: 60 + Math.round(Math.random() * 400),
-      tx: 20 + Math.round(Math.random() * 150),
+      rx: 0,
+      tx: 0,
     });
   }
   return arr;
@@ -63,31 +38,50 @@ const CustomTooltip = ({ active, payload, label }: {active?:boolean;payload?:{co
 };
 
 export function NetworkSection() {
+  const [stats, setStats] = useState<ServerStats | null>(null);
   const [traffic, setTraffic] = useState<TrafficPt[]>(initTraffic);
-  const [pings,   setPings]   = useState<PingTarget[]>(PING_TARGETS);
 
   useEffect(() => {
-    const t = setInterval(() => {
-      const now = new Date();
-      const time = `${String(now.getMinutes()).padStart(2,"0")}:${String(now.getSeconds()).padStart(2,"0")}`;
-      setTraffic(prev => {
-        const last = prev[prev.length - 1];
-        return [...prev.slice(-(MAX_PTS - 1)), {
-          time,
-          rx: Math.max(10, Math.min(800, last.rx + (Math.random() - 0.5) * 100)),
-          tx: Math.max(5,  Math.min(300, last.tx + (Math.random() - 0.5) * 50)),
-        }];
-      });
-      // Simulate ping jitter
-      setPings(prev => prev.map(p => ({
-        ...p,
-        latency: p.latency !== null ? Math.max(1, p.latency + Math.round((Math.random() - 0.5) * 5)) : null,
-      })));
-    }, 3000);
-    return () => clearInterval(t);
+    const fetchStats = async () => {
+      try {
+        const data = await api.getStats();
+        if (!data) throw new Error("No data");
+        setStats(data);
+        const now = new Date();
+        const time = `${String(now.getMinutes()).padStart(2,"0")}:${String(now.getSeconds()).padStart(2,"0")}`;
+
+        // Find primary interface for charting (usually wlan0 or eth0 or en0)
+        let primaryRx = 0;
+        let primaryTx = 0;
+        if (data.network?.interfaces && data.network.interfaces.length > 0) {
+          const primary = data.network.interfaces.find(i => i.name.startsWith("wl") || i.name.startsWith("en") || i.name.startsWith("eth")) || data.network.interfaces[0];
+          primaryRx = primary.rxRate;
+          primaryTx = primary.txRate;
+        }
+
+        setTraffic(prev => {
+          return [...prev.slice(-(MAX_PTS - 1)), {
+            time, rx: primaryRx, tx: primaryTx,
+          }];
+        });
+
+      } catch (_) {
+        setStats(null);
+        // Add 0 pt if offline
+        const now = new Date();
+        const time = `${String(now.getMinutes()).padStart(2,"0")}:${String(now.getSeconds()).padStart(2,"0")}`;
+        setTraffic(prev => [...prev.slice(-(MAX_PTS - 1)), { time, rx: 0, tx: 0 }]);
+      }
+    };
+
+    fetchStats();
+    const tStats = setInterval(fetchStats, 3000);
+    return () => clearInterval(tStats);
   }, []);
 
   const latest = traffic[traffic.length - 1];
+  const isOnline = stats !== null;
+  const interfaces = stats?.network?.interfaces || [];
 
   return (
     <div className="flex flex-col gap-5 h-full overflow-y-auto pb-2">
@@ -98,28 +92,35 @@ export function NetworkSection() {
 
       {/* Interfaces */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 shrink-0">
-        {INTERFACES.map(iface => (
-          <div key={iface.name} className="rounded-xl p-4 flex flex-col gap-2" style={{ background: "var(--card-bg)", border: "1px solid var(--border)" }}>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                {iface.status === "up" ? <Wifi size={14} style={{ color: "#34d399" }} /> : <WifiOff size={14} style={{ color: "#6b7280" }} />}
-                <span className="font-mono font-bold text-sm text-white">{iface.name}</span>
+        {interfaces.length > 0 ? interfaces.map(iface => {
+          const isUp = iface.status === "up" || iface.status === "running" || iface.status === "unknown"; // linux sometimes reports unknown
+          return (
+            <div key={iface.name} className="rounded-xl p-4 flex flex-col gap-2" style={{ background: "var(--card-bg)", border: "1px solid var(--border)" }}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  {isUp ? <Wifi size={14} style={{ color: "#34d399" }} /> : <WifiOff size={14} style={{ color: "#6b7280" }} />}
+                  <span className="font-mono font-bold text-sm text-white">{iface.name}</span>
+                </div>
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-bold" style={{
+                  background: isUp ? "rgba(52,211,153,0.1)" : "rgba(107,114,128,0.1)",
+                  color: isUp ? "#34d399" : "#6b7280",
+                  border: `1px solid ${isUp ? "rgba(52,211,153,0.2)" : "rgba(107,114,128,0.2)"}`,
+                }}>{iface.status.toUpperCase()}</span>
               </div>
-              <span className="text-[10px] px-2 py-0.5 rounded-full font-bold" style={{
-                background: iface.status === "up" ? "rgba(52,211,153,0.1)" : "rgba(107,114,128,0.1)",
-                color: iface.status === "up" ? "#34d399" : "#6b7280",
-                border: `1px solid ${iface.status === "up" ? "rgba(52,211,153,0.2)" : "rgba(107,114,128,0.2)"}`,
-              }}>{iface.status.toUpperCase()}</span>
+              <div className="font-mono text-xs text-gray-400">{iface.ip || "Немає IP"}</div>
+              <div className="font-mono text-[10px] text-gray-600">{iface.mac || "Немає MAC"}</div>
+              <div className="pt-1 flex justify-between text-[10px] text-gray-600">
+                <span>↓ {(iface.rx / 1073741824).toFixed(1)} GB</span>
+                <span>↑ {(iface.tx / 1073741824).toFixed(1)} GB</span>
+                <span className="text-gray-500">{iface.speed > 0 ? `${iface.speed} Mbps` : "—"}</span>
+              </div>
             </div>
-            <div className="font-mono text-xs text-gray-400">{iface.ip}</div>
-            <div className="font-mono text-[10px] text-gray-600">{iface.mac}</div>
-            <div className="pt-1 flex justify-between text-[10px] text-gray-600">
-              <span>↓ {(iface.rx / 1024).toFixed(1)} GB</span>
-              <span>↑ {(iface.tx / 1024).toFixed(1)} GB</span>
-              <span className="text-gray-500">{iface.speed}</span>
-            </div>
+          );
+        }) : (
+          <div className="col-span-full rounded-xl p-6 flex items-center justify-center text-gray-500" style={{ background: "var(--card-bg)", border: "1px dashed var(--border)" }}>
+            Немає даних про мережеві інтерфейси
           </div>
-        ))}
+        )}
       </div>
 
       {/* Traffic chart */}
@@ -172,21 +173,26 @@ export function NetworkSection() {
             </tr>
           </thead>
           <tbody className="divide-y" style={{ borderColor: "var(--border)" }}>
-            {pings.map(p => (
-              <tr key={p.host} className="hover:bg-white/[0.02] transition-colors">
-                <td className="px-4 py-3 font-medium text-gray-200">{p.host}</td>
-                <td className="px-4 py-3 font-mono text-gray-500">{p.ip}</td>
-                <td className="px-4 py-3 text-right font-mono" style={{ color: (p.latency ?? 0) < 20 ? "#34d399" : (p.latency ?? 0) < 50 ? "#fbbf24" : "#f87171" }}>
-                  {p.latency !== null ? `${p.latency} ms` : "—"}
-                </td>
-                <td className="px-4 py-3 text-right">
+            <tr className="hover:bg-white/2 transition-colors">
+              <td className="px-4 py-3 font-medium text-gray-200">Відповідь шлюзу/Інтернет</td>
+              <td className="px-4 py-3 font-mono text-gray-500">Автоматично</td>
+              <td className="px-4 py-3 text-right font-mono" style={{ color: (stats?.network?.ping ?? 0) < 50 ? "#34d399" : (stats?.network?.ping ?? 0) < 150 ? "#fbbf24" : "#f87171" }}>
+                {isOnline && stats?.network?.ping !== null ? `${stats.network.ping} ms` : "—"}
+              </td>
+              <td className="px-4 py-3 text-right">
+                {isOnline ? (
                   <span className="inline-flex items-center gap-1" style={{ color: "#34d399" }}>
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                     Online
                   </span>
-                </td>
-              </tr>
-            ))}
+                ) : (
+                  <span className="inline-flex items-center gap-1" style={{ color: "#6b7280" }}>
+                    <span className="w-1.5 h-1.5 rounded-full bg-gray-500" />
+                    Offline
+                  </span>
+                )}
+              </td>
+            </tr>
           </tbody>
         </table>
       </div>

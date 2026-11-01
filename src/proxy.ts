@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyToken, COOKIE_NAME } from "@/lib/jwt";
 
 // Які шляхи відкриті без авторизації
-const PUBLIC_PATHS = ["/login", "/api/auth/login", "/api/auth/setup"];
+const PUBLIC_PATHS = ["/login", "/api/auth/login", "/api/auth/setup", "/api/stats"];
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;

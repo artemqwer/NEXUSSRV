@@ -55,8 +55,8 @@ export function NetworkSection() {
         let primaryTx = 0;
         if (data.network?.interfaces && data.network.interfaces.length > 0) {
           const primary = data.network.interfaces.find(i => i.name.startsWith("wl") || i.name.startsWith("en") || i.name.startsWith("eth")) || data.network.interfaces[0];
-          primaryRx = primary.rxRate;
-          primaryTx = primary.txRate;
+          primaryRx = primary.rxRate / 125000;
+          primaryTx = primary.txRate / 125000;
         }
 
         setTraffic(prev => {

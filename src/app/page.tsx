@@ -61,8 +61,10 @@ function DashboardSection() {
   const isOnline    = stats !== null;
   const cpuLoad     = stats?.cpu?.usage ?? 0;
   const temperature = stats?.cpu?.temp  ?? 0;
-  const ramUsedGB   = stats?.ram?.used ? +(stats.ram.used / 1024).toFixed(1) : 0;
-  const ramTotalGB  = stats?.ram?.total ? +(stats.ram.total / 1024).toFixed(1) : 0;
+  const ramUsedGB   = stats?.ram?.used ? +(stats.ram.used / 1073741824).toFixed(1) : 0;
+  const ramTotalGB  = stats?.ram?.total ? +(stats.ram.total / 1073741824).toFixed(1) : 0;
+  const storageUsedGB = stats?.storage?.used ? +(stats.storage.used / 1073741824).toFixed(1) : 0;
+  const storageTotGB  = stats?.storage?.total ? +(stats.storage.total / 1073741824).toFixed(1) : 0;
   const ramPercent  = stats?.ram?.percent ?? 0;
   const storageUsed = stats?.storage?.used ?? 0;
   const storageTot  = stats?.storage?.total ?? 0;
@@ -79,7 +81,7 @@ function DashboardSection() {
             <Smartphone size={16} className="text-gray-500" />
             <h1 className="text-xl font-bold text-white">Огляд Сервера</h1>
           </div>
-          <p className="text-xs text-gray-500">Debian Linux · ARM · Останнє оновлення: {now}</p>
+          <p className="text-xs text-gray-500">Останнє оновлення: {now}</p>
         </div>
         {isOnline ? (
           <div
@@ -105,7 +107,7 @@ function DashboardSection() {
         <StatCard
           title="Навантаження ЦП"
           value={`${cpuLoad}%`}
-          subtitle={`ARM Cortex-A53 (${stats?.cpu?.cores ?? 8} cores)`}
+          subtitle={`${stats?.cpu?.cores ?? 0} cores`}
           icon={Cpu}
           iconColor="#00e5ff"
           extra={<ProgressBar value={cpuLoad} />}
@@ -119,9 +121,9 @@ function DashboardSection() {
           extra={<ProgressBar value={ramPercent} color="#818cf8" />}
         />
         <StatCard
-          title="Диск (eMMC)"
-          value={`${storageUsed} GB`}
-          subtitle={`Вільно: ${storageTot - storageUsed} GB / ${storageTot} GB`}
+          title="Диск"
+          value={`${storageUsedGB} GB`}
+          subtitle={`Вільно: ${+(storageTotGB - storageUsedGB).toFixed(1)} GB / ${storageTotGB} GB`}
           icon={HardDrive}
           iconColor="#34d399"
           extra={<ProgressBar value={storagePerc} color="#34d399" />}
@@ -129,7 +131,7 @@ function DashboardSection() {
         <StatCard
           title="Мережевий Ping"
           value={stats?.network?.ping ? `${stats.network.ping} ms` : "—"}
-          subtitle="wlan0 · Wi-Fi 5"
+          subtitle={stats?.network?.interfaces?.[0]?.name ?? "—"}
           icon={Network}
           iconColor="#c084fc"
           extra={<ProgressBar value={stats?.network?.ping ? Math.min(stats.network.ping, 100) : 0} color="#c084fc" />}
@@ -162,7 +164,7 @@ function DashboardSection() {
             {[
               { label: "Статус",        value: isOnline ? (tempWarn ? "Підвищена" : "Норма") : "Офлайн",   color: isOnline ? (tempWarn ? "#f59e0b" : "#34d399") : "#6b7280", icon: isOnline ? (tempWarn ? <AlertTriangle size={11} /> : <CheckCircle2 size={11} />) : <XCircle size={11} /> },
               { label: "Критична",      value: "80°C",                              color: "#f87171", icon: null },
-              { label: "Акумулятор",    value: isOnline && batteryLvl !== null ? `${batteryLvl}%` : "—",                   color: isOnline ? "#34d399" : "#6b7280", icon: <BatteryMedium size={11} /> },
+              { label: "Акумулятор",    value: isOnline && batteryLvl !== null ? `${Math.round(batteryLvl)}%` : "—",                   color: isOnline ? "#34d399" : "#6b7280", icon: <BatteryMedium size={11} /> },
               { label: "Зарядка",       value: isOnline ? (stats?.battery?.isCharging ? "Так" : "Ні") : "—", color: isOnline ? "#34d399" : "#6b7280", icon: null },
               { label: "Аптайм",        value: stats?.uptime          ?? "—",      color: isOnline ? "#94a3b8" : "#6b7280", icon: null },
             ].map(({ label, value, color, icon }) => (

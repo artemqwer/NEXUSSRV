@@ -59,9 +59,9 @@ export function StorageSection() {
   }, []);
 
   const disks = stats?.storage?.disks || [];
-  const totalBytes = disks.reduce((s, p) => s + p.size, 0);
-  const usedBytes = disks.reduce((s, p) => s + p.used, 0);
-  const pctTotal = totalBytes > 0 ? Math.round((usedBytes / totalBytes) * 100) : 0;
+  const totalBytes = stats?.storage?.total ?? 0;
+  const usedBytes = stats?.storage?.used ?? 0;
+  const pctTotal = stats?.storage?.percent ? Math.round(stats.storage.percent) : 0;
   const isOnline = stats !== null;
 
   const colors = ["#00e5ff", "#818cf8", "#34d399", "#fbbf24", "#c084fc", "#f87171"];

@@ -78,7 +78,7 @@ export function MonitoringSection() {
         let netSpeed = 0;
         if (s.network?.interfaces && s.network.interfaces.length > 0) {
            const primary = s.network.interfaces.find(i => i.name.startsWith("wl") || i.name.startsWith("en") || i.name.startsWith("eth")) || s.network.interfaces[0];
-           netSpeed = primary.rxRate + primary.txRate;
+           netSpeed = (primary.rxRate + primary.txRate) / 125000;
         }
 
         setData(prev => {
@@ -118,7 +118,7 @@ export function MonitoringSection() {
 
       {/* Live metric cards */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 shrink-0">
-        <MetricCard label="ЦП" value={isOnline ? `${latest.cpu}%` : "—"} sub={`arm64 (${stats?.cpu?.cores || 8} cores)`} color="#00e5ff" icon={<Cpu size={15} />} />
+        <MetricCard label="ЦП" value={isOnline ? `${latest.cpu}%` : "—"} sub={`${stats?.cpu?.cores || 0} cores`} color="#00e5ff" icon={<Cpu size={15} />} />
         <MetricCard label="RAM" value={isOnline ? `${latest.ram}%` : "—"} sub={isOnline ? `~${Math.round((stats?.ram?.used || 0)/1024)} / ${Math.round((stats?.ram?.total || 0)/1024)} GB` : "—"} color="#818cf8" icon={<MemoryStick size={15} />} />
         <MetricCard label="Мережа" value={isOnline ? `${latest.net} Mbps` : "—"} sub="Всі інтерфейси (Rx+Tx)" color="#c084fc" icon={<Network size={15} />} />
         <MetricCard label="Температура" value={isOnline ? `${latest.temp}°C` : "—"} sub="CPU Thermal" color="#fbbf24" icon={<Thermometer size={15} />} />

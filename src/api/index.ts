@@ -5,9 +5,8 @@
  * та вкажи реальний API_BASE_URL (наприклад, http://його_айпі:8080/api).
  */
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api";
-const API_KEY      = process.env.NEXT_PUBLIC_API_KEY || "";
-const USE_MOCK = false; 
+const API_BASE_URL = "/api";
+const USE_MOCK = false;
 
 export interface ServerStats {
   cpu: { usage: number; temp: number | null; cores: number };
@@ -64,11 +63,7 @@ export const api = {
     }
 
     try {
-      const headers: Record<string, string> = {};
-      if (API_KEY) headers["Authorization"] = `Bearer ${API_KEY}`;
-      
-      const res = await fetch(`${API_BASE_URL}/stats`, { headers });
-      if (!res.ok) throw new Error("Сервер недоступний");
+      const res = await fetch(`${API_BASE_URL}/stats`);
       return res.json();
     } catch (e) {
       console.error(e);

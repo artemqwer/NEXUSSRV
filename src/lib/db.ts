@@ -25,3 +25,15 @@ export async function initDb() {
     )
   `;
 }
+export async function initStatsTable() {
+  const sql = getDb();
+  await sql`
+    CREATE TABLE IF NOT EXISTS stats (
+      id         INTEGER PRIMARY KEY,
+      data       JSONB       NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+}
+
+

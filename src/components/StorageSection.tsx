@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { HardDrive, ArchiveX, RefreshCw, AlertCircle } from "lucide-react";
+import { HardDrive, ArchiveX, RefreshCw, AlertCircle, Activity } from "lucide-react";
 import { api, ServerStats } from "@/api";
 
 function byteFmt(bytes: number) {
@@ -101,6 +101,33 @@ export function StorageSection() {
           <span>{isOnline ? byteFmt(totalBytes - usedBytes) : 0} вільно</span>
         </div>
       </div>
+
+      {/* Disk I/O */}
+      {isOnline && stats?.storage?.io && (
+        <div className="rounded-xl p-5 shrink-0" style={{ background: "var(--card-bg)", border: "1px solid var(--border)" }}>
+          <div className="flex items-center gap-2 mb-4">
+            <Activity size={15} style={{ color: "#38bdf8" }} />
+            <span className="text-sm font-semibold text-white">Диск I/O</span>
+            <span className="text-[10px] text-gray-600 ml-auto font-mono">всі диски • дельта за 5с</span>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <div className="text-xs text-gray-500 mb-1">Читання</div>
+              <div className="text-2xl font-bold text-white">{(stats.storage.io.readRate / 1048576).toFixed(1)} <span className="text-sm text-gray-500">MB/s</span></div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500 mb-1">Запис</div>
+              <div className="text-2xl font-bold text-white">{(stats.storage.io.writeRate / 1048576).toFixed(1)} <span className="text-sm text-gray-500">MB/s</span></div>
+            </div>
+          </div>
+        </div>
+      )}
+      {isOnline && !stats?.storage?.io && (
+        <div className="rounded-xl p-4 flex items-center gap-3 shrink-0" style={{ background: "var(--card-bg)", border: "1px dashed rgba(255,255,255,0.08)" }}>
+          <Activity size={16} className="text-gray-600 shrink-0" />
+          <div className="text-xs text-gray-600">I/O-метрики з'являться після оновлення агента до v2</div>
+        </div>
+      )}
 
       {/* Partition grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">

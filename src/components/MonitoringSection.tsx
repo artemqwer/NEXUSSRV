@@ -18,6 +18,7 @@ interface Point {
 }
 
 import { api, ServerStats } from "@/api";
+import { AgentBadge, DataAge } from "@/components/AgentStatus";
 
 function initData(): Point[] {
   const arr: Point[] = [];
@@ -111,9 +112,15 @@ export function MonitoringSection() {
   return (
     <div className="flex flex-col gap-5 h-full overflow-y-auto pb-2">
       {/* Header */}
-      <div>
-        <h1 className="text-xl font-bold text-white">Моніторинг</h1>
-        <p className="text-xs text-gray-500 mt-0.5">Оновлення кожні 3 секунди • Live</p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold text-white">Моніторинг</h1>
+          <p className="text-xs text-gray-500 mt-0.5">Оновлення кожні 3 секунди • Live</p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <DataAge stats={stats} />
+          <AgentBadge stats={stats} />
+        </div>
       </div>
 
       {/* Live metric cards */}

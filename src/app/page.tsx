@@ -8,6 +8,7 @@ import { StatCard } from "@/components/StatCard";
 import { TemperatureGauge } from "@/components/TemperatureGauge";
 import { SearchModal } from "@/components/SearchModal";
 import { api, ServerStats } from "@/api";
+import { AgentBadge, DataAge } from "@/components/AgentStatus";
 import {
   Cpu, MemoryStick, HardDrive, Network,
   Bell, Search, CheckCircle2, Flame, AlertTriangle, Menu,
@@ -84,12 +85,16 @@ function DashboardSection() {
           <p className="text-xs text-gray-500">Останнє оновлення: {now}</p>
         </div>
         {isOnline ? (
-          <div
-            className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium"
-            style={{ background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.2)", color: "#34d399" }}
-          >
-            <CheckCircle2 size={13} />
-            Всі системи в нормі
+          <div className="hidden sm:flex items-center gap-2">
+            <DataAge stats={stats} />
+            <AgentBadge stats={stats} />
+            <div
+              className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium"
+              style={{ background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.2)", color: "#34d399" }}
+            >
+              <CheckCircle2 size={13} />
+              Всі системи в нормі
+            </div>
           </div>
         ) : (
           <div

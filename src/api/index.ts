@@ -22,6 +22,7 @@ export interface DockerContainer {
 }
 
 export interface ServerStats {
+  timestamp?: string;
   cpu: { usage: number; temp: number | null; cores: number; load?: { one: number; five: number; fifteen: number } };
   ram: { total: number; used: number; percent: number; swap?: { total: number; used: number; percent: number } };
   battery: { level: number | null; isCharging: boolean | null };

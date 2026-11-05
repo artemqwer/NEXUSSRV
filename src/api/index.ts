@@ -8,14 +8,28 @@
 const API_BASE_URL = "/api";
 const USE_MOCK = false;
 
+export interface TopProcess {
+  pid: number;
+  name: string;
+  cpu: number;
+  mem: number;
+}
+
+export interface DockerContainer {
+  name: string;
+  image: string;
+  status: string;
+}
+
 export interface ServerStats {
-  cpu: { usage: number; temp: number | null; cores: number };
-  ram: { total: number; used: number; percent: number };
+  cpu: { usage: number; temp: number | null; cores: number; load?: { one: number; five: number; fifteen: number } };
+  ram: { total: number; used: number; percent: number; swap?: { total: number; used: number; percent: number } };
   battery: { level: number | null; isCharging: boolean | null };
   storage: {
     total: number;
     used: number;
     percent: number;
+    io?: { readRate: number; writeRate: number };
     disks?: {
       mount: string;
       fs: string;
@@ -25,6 +39,9 @@ export interface ServerStats {
     }[];
   };
   uptime: string;
+  processes?: TopProcess[];
+  docker?: { available: boolean; containers: DockerContainer[] };
+  system?: { users: { count: number; names: string[] }; failedUnits: number | null };
   network: {
     ping: number | null;
     interfaces?: {

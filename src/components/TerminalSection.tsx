@@ -1,55 +1,94 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Wifi, WifiOff, RefreshCw, Terminal as TermIcon } from "lucide-react";
-
-// WebSocket URL для підключення до SSH-сервера на телефоні.
-// Бекенд друга повинен піднімати WS-сервер (наприклад, через node-pty + ws)
-// на тому ж порту або окремому.
-const getWsUrl = () => {
-  const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api";
-  const apiKey = process.env.NEXT_PUBLIC_API_KEY || "";
-  if (!base) return null;
-  // Перетворюємо http://... → ws://...
-  let url = base.replace(/^http/, "ws").replace(/\/api$/, "") + "/terminal";
-  if (apiKey) url += `?token=${apiKey}`;
-  return url;
-};
-
-type ConnState = "idle" | "connecting" | "connected" | "error" | "no-config";
-
+import {
+  Wifi, WifiOff, RefreshCw, Terminal as TermIcon,
+  Maximize2, Minimize2, Settings2, Zap,
+} from "lucide-react";
 import type { Terminal } from "@xterm/xterm";
+
+// WebSocket-адреса аґента-терміналу.
+// Аґент слухає тільки loopback, а в браузер його віддає `tailscale serve`
+// з TLS — тому wss://, інакше HTTPS-сторінка заблокує ws://.
+// Доступ перевіряється на сервері через Tailscale whois, токен не потрібен.
+const DEFAULT_WS_URL = "wss://shadxwfxry-hub.taila5dca9.ts.net/terminal";
+const LS_URL   = "terminalWsUrl";
+const LS_AUTORE = "terminalAutoReconnect";
+
+// Швидкі команди — вводяться прямо в PTY (код не виконує їх сам, їх бачить shell)
+const QUICK_COMMANDS: { label: string; cmd: string }[] = [
+  { label: "uptime",        cmd: "uptime\n" },
+  { label: "docker ps",     cmd: "docker ps\n" },
+  { label: "docker stats",  cmd: "docker stats --no-stream\n" },
+  { label: "df -h",         cmd: "df -h\n" },
+  { label: "free -h",       cmd: "free -h\n" },
+  { label: "htop",          cmd: "htop\n" },
+  { label: "journal err",   cmd: "journalctl -p 3 -n 30 --no-pager\n" },
+  { label: "systemctl fail",cmd: "systemctl list-units --failed\n" },
+];
+
+type ConnState = "idle" | "connecting" | "connected" | "error";
+
+function loadLs(key: string, fallback: string): string {
+  try { return window.localStorage.getItem(key) ?? fallback; } catch { return fallback; }
+}
+function saveLs(key: string, value: string) {
+  try { window.localStorage.setItem(key, value); } catch {}
+}
 
 export function TerminalSection() {
   const termDivRef  = useRef<HTMLDivElement>(null);
   const termRef     = useRef<Terminal | null>(null);
   const wsRef       = useRef<WebSocket | null>(null);
-
   const fitRef      = useRef<{ fit(): void } | null>(null);
+  const roRef       = useRef<ResizeObserver | null>(null);
+  const reconTimer  = useRef<number | null>(null);
+  const userClosed  = useRef(false);
+  // актуальні connect/autoRe для колбеків без стаб-клозурів
+  const connectRef  = useRef<(() => void) | null>(null);
+  const autoReRef   = useRef(true);
+
   const [connState, setConnState] = useState<ConnState>("idle");
-  const [wsUrl,     setWsUrl]     = useState<string | null>(null);
+  const [wsUrl, setWsUrlState]    = useState<string>(() => loadLs(LS_URL, DEFAULT_WS_URL));
+  const [autoRe, setAutoRe]       = useState<boolean>(() => loadLs(LS_AUTORE, "1") === "1");
+  const [showSettings, setShowSettings] = useState(false);
+  const [urlDraft, setUrlDraft]   = useState(wsUrl);
+  const [isFull, setIsFull]       = useState(false);
 
-  // Визначаємо URL при ініціалізації
-  useEffect(() => {
-    const url = getWsUrl();
-    setWsUrl(url);
-    if (!url) setConnState("no-config");
-  }, []);
+  autoReRef.current = autoRe;
+  const setWsUrl = (v: string) => { saveLs(LS_URL, v); setWsUrlState(v); };
+  const toggleAutoRe = () => setAutoRe(v => { saveLs(LS_AUTORE, v ? "0" : "1"); return !v; });
 
-  // Ініціалізація xterm.js
+  const cleanupTerminal = () => {
+    roRef.current?.disconnect();
+    roRef.current = null;
+    termRef.current?.dispose();
+    termRef.current = null;
+    fitRef.current = null;
+    if (termDivRef.current) termDivRef.current.innerHTML = "";
+  };
+
+  const disconnect = (auto = false) => {
+    userClosed.current = !auto;
+    if (reconTimer.current !== null) {
+      window.clearTimeout(reconTimer.current);
+      reconTimer.current = null;
+    }
+    wsRef.current?.close();
+    wsRef.current = null;
+    setConnState("idle");
+  };
+
+  // Ініціалізація xterm.js (контейнер завжди має ненульовий розмір —
+  // додаток-плейсхолдер лежить поверх, а не замість нього)
   const initTerminal = async () => {
-    if (!termDivRef.current) return;
+    if (!termDivRef.current) return null;
 
     const { Terminal } = await import("@xterm/xterm");
     const { FitAddon  } = await import("@xterm/addon-fit");
     const { WebLinksAddon } = await import("@xterm/addon-web-links");
 
-    // Очищуємо попередній інстанс якщо є
-    if (termRef.current) {
-      termRef.current.dispose();
-      termRef.current = null;
-    }
-    termDivRef.current.innerHTML = "";
+    cleanupTerminal();
 
     const term = new Terminal({
       cursorBlink: true,
@@ -77,26 +116,48 @@ export function TerminalSection() {
     term.loadAddon(fit);
     term.loadAddon(new WebLinksAddon());
 
+    // даємо браузеру кадр, щоб контейнер уже мав розміри до open()
+    await new Promise((r) => requestAnimationFrame(r));
     term.open(termDivRef.current);
-    fit.fit();
+    try { fit.fit(); } catch {}
     fitRef.current = fit;
     termRef.current = term;
 
-    // Resize observer
-    const ro = new ResizeObserver(() => fit.fit());
+    const ro = new ResizeObserver(() => { try { fit.fit(); } catch {} });
     ro.observe(termDivRef.current);
+    roRef.current = ro;
+
+    term.onData((data: string) => {
+      const ws = wsRef.current;
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "input", data }));
+      }
+    });
+
+    term.onResize(({ cols, rows }: { cols: number; rows: number }) => {
+      const ws = wsRef.current;
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "resize", cols, rows }));
+      }
+    });
 
     return term;
   };
 
   const connect = async () => {
-    if (!wsUrl) { setConnState("no-config"); return; }
+    if (reconTimer.current !== null) {
+      window.clearTimeout(reconTimer.current);
+      reconTimer.current = null;
+    }
+    userClosed.current = false;
+    wsRef.current?.close();
+    wsRef.current = null;
 
     setConnState("connecting");
     const term = await initTerminal();
     if (!term) return;
 
-    term.writeln("\r\n  \x1b[36mПідключення до \x1b[1m" + wsUrl + "\x1b[0m\r\n");
+    term.write("\r\n  \x1b[36mПідключення до \x1b[1m" + wsUrl + "\x1b[0m\r\n");
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
@@ -106,9 +167,9 @@ export function TerminalSection() {
     ws.onopen = () => {
       opened = true;
       setConnState("connected");
-      term.writeln("\x1b[32m  ✓ З'єднання встановлено\x1b[0m\r\n");
-      // Передаємо розмір терміналу на сервер
+      term.write("\x1b[32m  ✓ З'єднання встановлено\x1b[0m\r\n");
       ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+      term.focus();
     };
 
     ws.onmessage = (e) => {
@@ -120,71 +181,87 @@ export function TerminalSection() {
           term.write(e.data);
         }
       } else {
-        // Binary — пишемо напряму
         e.data.arrayBuffer().then((buf: ArrayBuffer) => term.write(new Uint8Array(buf)));
       }
     };
 
     ws.onerror = () => {
-      setConnState("error");
-      term.writeln("\r\n\x1b[31m  ✗ Помилка підключення. Перевір що бекенд запущений.\x1b[0m\r\n");
+      if (!opened) setConnState("error");
+      term.write("\r\n\x1b[31m  ✗ Помилка підключення. Перевір, що terminal.py запущений на сервері.\x1b[0m\r\n");
     };
 
     ws.onclose = () => {
-      if (opened) {
-        setConnState("idle");
-        term.writeln("\r\n\x1b[33m  ⚠ З'єднання розірвано\x1b[0m\r\n");
+      if (!opened) {
+        setConnState("error");
+        return;
+      }
+      setConnState("idle");
+      term.write("\r\n\x1b[33m  ⚠ З'єднання розірвано\x1b[0m\r\n");
+      if (autoReRef.current && !userClosed.current) {
+        reconTimer.current = window.setTimeout(() => { connectRef.current?.(); }, 3000);
       }
     };
-
-    // Клавішне введення → WebSocket
-    term.onData((data: string) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "input", data }));
-      }
-    });
-
-    // При зміні розміру
-    term.onResize(({ cols, rows }: { cols: number; rows: number }) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "resize", cols, rows }));
-      }
-    });
   };
 
-  const disconnect = () => {
-    wsRef.current?.close();
-    wsRef.current = null;
-    setConnState("idle");
+  // завжди актуальний connect для авто-реконнекту
+  useEffect(() => { connectRef.current = connect; });
+
+  const runQuick = (cmd: string) => {
+    const ws = wsRef.current;
+    if (ws?.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: "input", data: cmd }));
+    termRef.current?.focus();
   };
 
-  // Cleanup при unmount
+  // cleanup при unmount
   useEffect(() => {
     return () => {
-      wsRef.current?.close();
-      termRef.current?.dispose();
+      if (reconTimer.current !== null) window.clearTimeout(reconTimer.current);
+      try { wsRef.current?.close(); } catch {}
+      cleanupTerminal();
     };
   }, []);
 
   const stateLabel: Record<ConnState, { text: string; color: string }> = {
-    idle:      { text: "Не підключено",   color: "#6b7280" },
-    connecting:{ text: "Підключення...",  color: "#fbbf24" },
-    connected: { text: "Підключено",      color: "#34d399" },
-    error:     { text: "Помилка",         color: "#f87171" },
-    "no-config":{ text: "URL не налаштовано", color: "#f87171" },
+    idle:      { text: "Не підключено",  color: "#6b7280" },
+    connecting:{ text: "Підключення...", color: "#fbbf24" },
+    connected: { text: "Підключено",     color: "#34d399" },
+    error:     { text: "Помилка",        color: "#f87171" },
   };
   const st = stateLabel[connState];
+  const isActive = connState === "connected" || connState === "connecting";
 
   return (
-    <div className="flex flex-col h-full gap-3">
+    <div
+      className="flex flex-col gap-3"
+      style={isFull ? { position: "fixed", inset: "12px", zIndex: 60 } : undefined}
+    >
       {/* Header */}
       <div className="flex items-center justify-between shrink-0">
         <div>
           <h1 className="text-xl font-bold text-white">Термінал</h1>
-          <p className="text-xs text-gray-500 mt-0.5">SSH-з&apos;єднання з Debian-сервером (телефон)</p>
+          <p className="text-xs text-gray-500 mt-0.5">Web-термінал сервера через tailnet</p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setIsFull(v => !v)}
+            className="p-2 rounded-lg text-gray-400 hover:text-white transition-colors"
+            style={{ background: "var(--card-bg)", border: "1px solid var(--border)" }}
+            title={isFull ? "Згорнути" : "На весь екран"}
+          >
+            {isFull ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+          </button>
+
+          <button
+            onClick={() => { setShowSettings(v => !v); setUrlDraft(wsUrl); }}
+            className="p-2 rounded-lg text-gray-400 hover:text-white transition-colors"
+            style={{ background: "var(--card-bg)", border: "1px solid var(--border)" }}
+            title="Налаштування з'єднання"
+          >
+            <Settings2 size={13} />
+          </button>
+
           {/* Status badge */}
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium"
             style={{ background: `${st.color}15`, border: `1px solid ${st.color}30`, color: st.color }}>
@@ -194,7 +271,7 @@ export function TerminalSection() {
 
           {connState === "connected" ? (
             <button
-              onClick={disconnect}
+              onClick={() => disconnect()}
               className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg font-medium transition-all"
               style={{ background: "rgba(248,113,113,0.1)", color: "#f87171", border: "1px solid rgba(248,113,113,0.2)" }}
             >
@@ -203,7 +280,7 @@ export function TerminalSection() {
           ) : (
             <button
               onClick={connect}
-              disabled={connState === "connecting" || connState === "no-config"}
+              disabled={connState === "connecting"}
               className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg font-medium transition-all disabled:opacity-40"
               style={{ background: "var(--cyan-dim)", color: "var(--cyan)", border: "1px solid rgba(0,229,255,0.2)" }}
             >
@@ -214,20 +291,69 @@ export function TerminalSection() {
         </div>
       </div>
 
-      {/* Info banner if no URL */}
-      {connState === "no-config" && (
-        <div className="shrink-0 rounded-lg px-4 py-3 text-sm" style={{ background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.2)", color: "#fbbf24" }}>
-          <strong>Налаштуй URL бекенду</strong> у розділі ⚙️ Налаштування → поле URL бекенду.
-          <br />
-          <span className="text-xs opacity-70">
-            Бекенд повинен відкрити WebSocket endpoint <code className="font-mono">/terminal</code> (наприклад через <code>node-pty</code> + <code>ws</code>).
-          </span>
+      {/* Settings panel */}
+      {showSettings && (
+        <div className="rounded-xl p-4 flex flex-col gap-3 shrink-0" style={{ background: "var(--card-bg)", border: "1px solid var(--border)" }}>
+          <label className="text-xs text-gray-400 flex flex-col gap-1.5">
+            WebSocket-адреса аґента
+            <input
+              type="text"
+              value={urlDraft}
+              onChange={(e) => setUrlDraft(e.target.value)}
+              placeholder={DEFAULT_WS_URL}
+              className="rounded-lg px-3 py-2 text-xs font-mono text-white outline-none"
+              style={{ background: "rgba(255,255,255,0.03)", border: "1px solid var(--border)" }}
+            />
+          </label>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => {
+                setWsUrl(urlDraft.trim() || DEFAULT_WS_URL);
+                setShowSettings(false);
+                if (connState === "connected" || connState === "connecting") disconnect();
+                connect();
+              }}
+              className="text-xs px-3 py-2 rounded-lg font-medium"
+              style={{ background: "var(--cyan-dim)", color: "var(--cyan)", border: "1px solid rgba(0,229,255,0.2)" }}
+            >
+              Зберегти і підключитись
+            </button>
+            <button
+              onClick={toggleAutoRe}
+              className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg"
+              style={{
+                background: autoRe ? "rgba(16,185,129,0.1)" : "rgba(255,255,255,0.03)",
+                color: autoRe ? "#34d399" : "#9ca3af",
+                border: `1px solid ${autoRe ? "rgba(16,185,129,0.2)" : "var(--border)"}`,
+              }}
+              title="Автоматично перепідключатись, якщо з'єднання обірвалось"
+            >
+              <Zap size={11} />
+              Автоперепідключення: {autoRe ? "увімк" : "вимк"}
+            </button>
+          </div>
         </div>
       )}
 
+      {/* Quick commands */}
+      <div className="flex flex-wrap gap-2 shrink-0">
+        {QUICK_COMMANDS.map((q) => (
+          <button
+            key={q.label}
+            onClick={() => runQuick(q.cmd)}
+            disabled={connState !== "connected"}
+            className="text-[11px] px-2.5 py-1 rounded-md font-mono transition-all disabled:opacity-30 hover:opacity-100"
+            style={{ background: "rgba(255,255,255,0.04)", color: "#9fb3c8", border: "1px solid var(--border)" }}
+            title={`Виконати в терміналі: ${q.cmd.trim()}`}
+          >
+            {q.label}
+          </button>
+        ))}
+      </div>
+
       {/* xterm.js container */}
       <div
-        className="flex-1 rounded-xl overflow-hidden"
+        className="relative flex-1 min-h-[300px] rounded-xl overflow-hidden"
         style={{ background: "#0a0e14", border: "1px solid rgba(0,229,255,0.12)", boxShadow: "0 0 40px rgba(0,229,255,0.04)" }}
       >
         {/* Window chrome */}
@@ -235,33 +361,45 @@ export function TerminalSection() {
           <span className="w-3 h-3 rounded-full bg-red-500/70" />
           <span className="w-3 h-3 rounded-full bg-yellow-400/70" />
           <span className="w-3 h-3 rounded-full bg-green-400/70" />
-          <span className="ml-3 text-[11px] text-gray-600 font-mono">
-            {connState === "connected" ? (wsUrl ?? "ssh") : "admin@debian-phone — не підключено"}
+          <span className="ml-3 text-[11px] text-gray-600 font-mono truncate">
+            {connState === "connected" ? wsUrl : "shadxwfxry-hub — не підключено"}
           </span>
         </div>
 
-        {/* Idle placeholder */}
-        {connState !== "connected" && connState !== "connecting" && (
-          <div className="flex flex-col items-center justify-center h-48 gap-3 text-gray-600">
-            <TermIcon size={32} className="opacity-20" />
-            <p className="text-sm">Натисни «Підключитись» щоб відкрити SSH-сесію</p>
-          </div>
-        )}
-
-        {/* xterm target */}
+        {/* xterm target — завжди з розміром, щоб open()/fit() не падали в 0×0 */}
         <div
           ref={termDivRef}
           className="w-full"
-          style={{
-            height: connState === "connected" || connState === "connecting" ? "calc(100% - 40px)" : "0px",
-            overflow: "hidden",
-          }}
+          style={{ height: "calc(100% - 40px)", overflow: "hidden" }}
         />
+
+        {/* Idle / error overlay */}
+        {!isActive && (
+          <div className="absolute inset-x-0 bottom-0 top-[40px] flex flex-col items-center justify-center gap-3 text-gray-500"
+            style={{ background: "rgba(10,14,20,0.88)" }}>
+            <TermIcon size={32} className="opacity-20" />
+            <p className="text-sm">
+              {connState === "error"
+                ? "Не вдалося підключитись — перевір агент і з'єднання"
+                : "Натисни «Підключитись» щоб відкрити сесію на сервері"}
+            </p>
+            {connState === "error" && (
+              <button
+                onClick={connect}
+                className="text-xs px-3 py-1.5 rounded-lg font-medium"
+                style={{ background: "var(--cyan-dim)", color: "var(--cyan)", border: "1px solid rgba(0,229,255,0.2)" }}
+              >
+                Спробувати знову
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Note */}
       <p className="text-[11px] text-gray-600 shrink-0">
-        Потрібен WS-сервер на боці Debian: <code className="font-mono text-gray-500">npm install -g ttyd</code> або <code className="font-mono text-gray-500">node-pty + ws</code> — твій друг налаштовує це на телефоні.
+        Сесію відкриває <code className="font-mono text-gray-500">agent/terminal.py</code> на сервері (слухає лише loopback,
+        у браузер віддається через <code className="font-mono text-gray-500">tailscale serve</code>). Доступ — лише tailnet-акаунти з allowlist.
       </p>
     </div>
   );

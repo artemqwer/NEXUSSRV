@@ -131,7 +131,7 @@ function DashboardSection() {
         <StatCard
           title="Мережевий Ping"
           value={stats?.network?.ping ? `${stats.network.ping} ms` : "—"}
-          subtitle={stats?.network?.interfaces?.[0]?.name ?? "—"}
+          subtitle={stats?.network?.interfaces?.find(i => i.name !== "lo" && !!i.ip)?.name ?? "—"}
           icon={Network}
           iconColor="#c084fc"
           extra={<ProgressBar value={stats?.network?.ping ? Math.min(stats.network.ping, 100) : 0} color="#c084fc" />}
@@ -191,6 +191,8 @@ export default function AdminDashboard() {
   const [sidebarOpen,  setSidebarOpen]  = useState(false);
   const [searchOpen,   setSearchOpen]   = useState(false);
   const [currentUser,  setCurrentUser]  = useState<{ displayName: string; role: string } | null>(null);
+  const [alertsOpen,   setAlertsOpen]   = useState(false);
+  const [alertStats,   setAlertStats]   = useState<ServerStats | null>(null);
 
   // Завантажуємо поточного юзера
   useEffect(() => {
@@ -200,15 +202,54 @@ export default function AdminDashboard() {
       .catch(() => {});
   }, []);
 
+  // Статистика для алертів дзвіночка
+  useEffect(() => {
+    const fetchStats = () => {
+      api.getStats().then(setAlertStats).catch(() => setAlertStats(null));
+    };
+    fetchStats();
+    const t = setInterval(fetchStats, 5000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Обрахунок алертів по порогам
+  const alerts: { text: string; level: "warn" | "crit" }[] = [];
+  {
+    const s = alertStats;
+    if (!s) {
+      alerts.push({ text: "Сервер офлайн", level: "crit" });
+    } else {
+      const push = (text: string, level: "warn" | "crit") => alerts.push({ text, level });
+      if ((s.cpu?.usage ?? 0) >= 85) push(`Високе навантаження ЦП: ${Math.round(s.cpu.usage)}%`, "crit");
+      if ((s.ram?.percent ?? 0) >= 90) push(`RAM майже повна: ${Math.round(s.ram.percent)}%`, "crit");
+      else if ((s.ram?.percent ?? 0) >= 80) push(`RAM під тиском: ${Math.round(s.ram.percent)}%`, "warn");
+      const t = s.cpu?.temp;
+      if (t !== null && t >= 75) push(`Критична температура: ${Math.round(t)}°C`, "crit");
+      else if (t !== null && t >= 65) push(`Температура вища норми: ${Math.round(t)}°C`, "warn");
+      const swap = s.ram?.swap?.percent ?? 0;
+      if (swap >= 50) push(`Swap активно юзається: ${Math.round(swap)}%`, "warn");
+      const disk = s.storage?.percent ?? 0;
+      if (disk >= 90) push(`Диск майже заповнений: ${Math.round(disk)}%`, "crit");
+      else if (disk >= 80) push(`Диск заповнюється: ${Math.round(disk)}%`, "warn");
+      const failedUnits = s.system?.failedUnits ?? 0;
+      if (failedUnits > 0) push(`Failed systemd-юнітів: ${failedUnits}`, "warn");
+      const ping = s.network?.ping;
+      if (ping === null) push("Ping втрачено", "warn");
+      else if (ping !== null && ping >= 300) push(`Високий ping: ${Math.round(ping)} ms`, "warn");
+    }
+  }
+
   const handleLogout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
     router.replace("/login");
   };
 
-  // Ctrl+K / Cmd+K — відкрити пошук
+  // Ctrl+K / Cmd+K — відкрити пошук (але не в web-терміналі, там це биндинг оболонки)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+        const el = document.activeElement as HTMLElement | null;
+        if (el && el.closest(".xterm")) return;
         e.preventDefault();
         setSearchOpen(v => !v);
       }
@@ -278,10 +319,50 @@ export default function AdminDashboard() {
                 Online
               </div>
 
-              <button className="relative p-1.5 text-gray-400 hover:text-white transition-colors">
-                <Bell size={17} />
-                <span className="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-red-500" />
-              </button>
+              <div className="relative">
+                <button
+                  onClick={() => setAlertsOpen(v => !v)}
+                  className="relative p-1.5 text-gray-400 hover:text-white transition-colors"
+                >
+                  <Bell size={17} />
+                  {alerts.length > 0 && <span className="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-red-500" />}
+                </button>
+
+                {alertsOpen && (
+                  <>
+                    {/* прозорий фон, щоб кадрити діє на клік */}
+                    <button
+                      className="fixed inset-0 z-40 cursor-default"
+                      onClick={() => setAlertsOpen(false)}
+                      aria-label="Закрити сповіщення"
+                    />
+                    <div
+                      className="absolute right-0 top-9 z-50 w-72 rounded-xl p-3 flex flex-col gap-2 max-h-80 overflow-y-auto"
+                      style={{ background: "var(--card-bg)", border: "1px solid var(--border)", boxShadow: "0 10px 40px rgba(0,0,0,0.4)" }}
+                    >
+                      <div className="text-xs font-semibold text-white mb-1">Сповіщення</div>
+                      {alerts.length === 0 ? (
+                        <div className="text-xs text-gray-500 py-2">Все в нормі ✓</div>
+                      ) : (
+                        alerts.map((a, i) => (
+                          <div
+                            key={i}
+                            className="flex items-start gap-2 rounded-lg px-3 py-2 text-xs"
+                            style={{
+                              background: a.level === "crit" ? "rgba(248,113,113,0.08)" : "rgba(245,158,11,0.08)",
+                              border: `1px solid ${a.level === "crit" ? "rgba(248,113,113,0.2)" : "rgba(245,158,11,0.2)"}`,
+                              color: a.level === "crit" ? "#f87171" : "#f59e0b",
+                            }}
+                          >
+                            <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+                            {a.text}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
 
               {/* Avatar + logout */}
               <div className="flex items-center gap-2">

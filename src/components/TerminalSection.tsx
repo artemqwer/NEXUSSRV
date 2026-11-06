@@ -44,6 +44,9 @@ export function TerminalSection() {
   const roRef       = useRef<ResizeObserver | null>(null);
   const reconTimer  = useRef<number | null>(null);
   const userClosed  = useRef(false);
+  // heartbeat: виявлення "піввідкритого" TCP (наприклад, після рестарту tailscaled)
+  const hbTimer     = useRef<number | null>(null);
+  const pongTimer   = useRef<number | null>(null);
   // актуальні connect/autoRe для колбеків без стаб-клозурів
   const connectRef  = useRef<(() => void) | null>(null);
   const autoReRef   = useRef(true);
@@ -70,6 +73,7 @@ export function TerminalSection() {
 
   const disconnect = (auto = false) => {
     userClosed.current = !auto;
+    stopHeartbeat();
     if (reconTimer.current !== null) {
       window.clearTimeout(reconTimer.current);
       reconTimer.current = null;
@@ -77,6 +81,28 @@ export function TerminalSection() {
     wsRef.current?.close();
     wsRef.current = null;
     setConnState("idle");
+  };
+
+  const stopHeartbeat = () => {
+    if (hbTimer.current !== null)   { window.clearInterval(hbTimer.current);   hbTimer.current = null; }
+    if (pongTimer.current !== null) { window.clearTimeout(pongTimer.current);  pongTimer.current = null; }
+  };
+
+  // TCP може померти непомітно (сервістика tailscaled, зміна мережі) —
+  // тоді браузерний WS висить у OPEN і onclose не приходить.
+  // Лікуємо: періодичний app-level ping; немає pong за 8с — ріжаємо сокет і реконект.
+  const startHeartbeat = () => {
+    stopHeartbeat();
+    hbTimer.current = window.setInterval(() => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      try { ws.send(JSON.stringify({ type: "ping" })); } catch {}
+      if (pongTimer.current !== null) window.clearTimeout(pongTimer.current);
+      pongTimer.current = window.setTimeout(() => {
+        // мертвий сокет: примусово закриваємо — далі спрацює onclose/автоперепідключення
+        try { ws.close(); } catch {}
+      }, 8000);
+    }, 15000);
   };
 
   // Ініціалізація xterm.js (контейнер завжди має ненульовий розмір —
@@ -117,7 +143,11 @@ export function TerminalSection() {
     term.loadAddon(new WebLinksAddon());
 
     // даємо браузеру кадр, щоб контейнер уже мав розміри до open()
-    await new Promise((r) => requestAnimationFrame(r));
+    // (race із таймаутом: у фоні requestAnimationFrame не тікає і реконект зависав би)
+    await Promise.race([
+      new Promise<void>((r) => requestAnimationFrame(() => r())),
+      new Promise<void>((r) => setTimeout(r, 600)),
+    ]);
     term.open(termDivRef.current);
     try { fit.fit(); } catch {}
     fitRef.current = fit;
@@ -169,6 +199,7 @@ export function TerminalSection() {
       setConnState("connected");
       term.write("\x1b[32m  ✓ З'єднання встановлено\x1b[0m\r\n");
       ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+      startHeartbeat();
       term.focus();
     };
 
@@ -176,6 +207,10 @@ export function TerminalSection() {
       if (typeof e.data === "string") {
         try {
           const msg = JSON.parse(e.data);
+          if (msg.type === "pong") {
+            if (pongTimer.current !== null) { window.clearTimeout(pongTimer.current); pongTimer.current = null; }
+            return;
+          }
           if (msg.type === "output") term.write(msg.data);
         } catch {
           term.write(e.data);
@@ -191,8 +226,13 @@ export function TerminalSection() {
     };
 
     ws.onclose = () => {
+      stopHeartbeat();
       if (!opened) {
         setConnState("error");
+        // сервер лежить — пробуємо далі, щоб авто відродилось коли стане докупи
+        if (autoReRef.current && !userClosed.current) {
+          reconTimer.current = window.setTimeout(() => { connectRef.current?.(); }, 3000);
+        }
         return;
       }
       setConnState("idle");
@@ -216,6 +256,7 @@ export function TerminalSection() {
   // cleanup при unmount
   useEffect(() => {
     return () => {
+      stopHeartbeat();
       if (reconTimer.current !== null) window.clearTimeout(reconTimer.current);
       try { wsRef.current?.close(); } catch {}
       cleanupTerminal();

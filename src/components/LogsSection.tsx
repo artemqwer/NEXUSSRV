@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Download, Filter, XCircle, CheckCircle2, AlertTriangle, Info } from "lucide-react";
+import { api } from "@/api";
 
 interface LogEntry {
   id: number;
@@ -28,31 +29,31 @@ export function LogsSection() {
     const fetchLogs = async () => {
       if (paused) return;
       try {
-        const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api";
-        const key = process.env.NEXT_PUBLIC_API_KEY || "";
-        const headers: Record<string, string> = {};
-        if (key) headers["Authorization"] = `Bearer ${key}`;
+        const s = await api.getStats();
+        const lines = s?.logs;
+        if (!lines) return;
 
-        const res = await fetch(`${BASE}/logs?lines=100`, { headers });
-        if (!res.ok) return;
-        const data = await res.json();
-        
-        const parsedLogs: LogEntry[] = data.logs.map((line: string, i: number) => {
+        const parsedLogs: LogEntry[] = lines.map((line, i) => {
+          // формат journalctl -o short-iso: "2026-11-06T20:34:45+0000 host unit[pid]: message"
+          const m = line.match(/^(\d{4}-\d{2}-\d{2}T[\d:+,-]+)\s+(.*)$/);
+          const rawTime = m ? m[1] : "";
+          const body    = m ? m[2] : line;
+
+          // host + process[pid] до першого ": "
+          const col = body.indexOf(": ");
+          const meta   = col > -1 ? body.slice(0, col) : "";
+          const msg    = col > -1 ? body.slice(col + 2) : body;
+          const source = meta.split(/\s+/).slice(1).join(" ") || "syslog";
+
           let level: "INFO" | "WARN" | "ERROR" = "INFO";
-          const lineL = line.toLowerCase();
-          if (lineL.includes("error") || lineL.includes("fail") || lineL.includes("crit")) level = "ERROR";
-          else if (lineL.includes("warn")) level = "WARN";
+          const lineL = body.toLowerCase();
+          if (/\b(error|failed|fail|crit|fatal)\b/.test(lineL)) level = "ERROR";
+          else if (/\b(warn|warning)\b/.test(lineL)) level = "WARN";
 
-          const now = new Date();
-          const fallbackTime = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}:${String(now.getSeconds()).padStart(2,"0")}`;
+          const t = rawTime.match(/T(\d{2}:\d{2}:\d{2})/);
+          const time = t ? t[1] : "--:--:--";
 
-          return {
-            id: i,
-            time: fallbackTime,
-            level,
-            source: data.source || "syslog",
-            message: line,
-          };
+          return { id: i, time, level, source, message: msg };
         });
 
         setLogs(parsedLogs);

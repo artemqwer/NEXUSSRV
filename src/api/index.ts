@@ -43,6 +43,7 @@ export interface ServerStats {
   processes?: TopProcess[];
   docker?: { available: boolean; containers: DockerContainer[] };
   system?: { users: { count: number; names: string[] }; failedUnits: number | null };
+  logs?: string[];
   network: {
     ping: number | null;
     interfaces?: {
